@@ -1,0 +1,15 @@
+services:
+  postgres:   
+    image: postgres:16  # use version nr 16
+    container_name: films_postgres
+    environment:
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: ${DB_NAME}    # need .env variables to create container from image 
+    ports:
+      - "5432:5432"   # runs on port 5432
+    volumes:
+      - postgres_data:/var/lib/postgresql/data  # bridge ssd : temporary inside linux virtual machine inside container 
+
+volumes:
+  postgres_data:
