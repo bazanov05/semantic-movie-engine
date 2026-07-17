@@ -1,5 +1,4 @@
 import pandas as pd
-import psycopg
 
 
 def clean_data(file_path: str) -> pd.DataFrame:
@@ -80,5 +79,16 @@ def load_data_to_db(conn, df: pd.DataFrame) -> None:
     with conn.cursor() as cursor:
         with cursor.copy(copy_query) as copy:
             copy.write_many(records)
+    
+    conn.commit()
+
+
+def init_db(conn, schema_path: str = "src/db/schema.sql") -> None:
+    """Reads and executes the SQL schema to create necessary database tables."""
+    with open(file=schema_path, mode="r", encoding="utf-8") as f:
+        schema_sql = f.read()
+
+    with conn.cursor() as cursor:
+        cursor.execute(schema_sql)
     
     conn.commit()
