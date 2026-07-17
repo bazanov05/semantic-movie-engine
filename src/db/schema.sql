@@ -1,4 +1,4 @@
-CREATE TABLE films (
+CREATE TABLE IF NOT EXISTS films (
     film_id INT PRIMARY KEY,              
     title TEXT NOT NULL,
     genres JSONB,                         
