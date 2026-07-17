@@ -58,3 +58,14 @@ def init_pool():
 
     except Exception as e:
         raise RuntimeError(f"Error with connecting to DB: {e}")
+
+
+def close_pool():
+    """
+    Closes all active database connections and terminates the global connection pool.
+
+    Should be called during application shutdown or inside a finally block to gracefully
+    release database socket resources.
+    """
+    global pool
+    pool.close()
