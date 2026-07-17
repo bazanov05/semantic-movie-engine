@@ -17,9 +17,14 @@ def load_data_to_db(conn, df: pd.DataFrame) -> None:
     Returns:
         None
     """
-    # create a list of tuples cause db does not understand Pandas df
-    # do not include pandas rows indices and add tuples without names
-    records = list(df.itertuples(index=False, name=None))
+    # create a list of tuples because psycopg does not understand Pandas DataFrames
+    # pandas internally stores missing values as float('nan'), not None —
+    # even after fillna(None), numpy will expose the underlying nan again via to_numpy()
+    # so we re-check at the boundary and convert to Python None for PostgreSQL NULL compatibility
+    records = [
+        tuple(None if (pd.isna(v)) else v for v in row)
+        for row in df.to_numpy()
+    ]
 
     # insert data to "films" table from standard input, not the file 
     copy_query = """
@@ -29,7 +34,8 @@ def load_data_to_db(conn, df: pd.DataFrame) -> None:
 
     with conn.cursor() as cursor:
         with cursor.copy(copy_query) as copy:
-            copy.write_many(records)
+            for record in records:
+                copy.write_row(record)
     
     conn.commit()
 
