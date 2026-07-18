@@ -49,3 +49,43 @@ def init_db(conn, schema_path: str = "src/db/schema.sql") -> None:
         cursor.execute(schema_sql)
     
     conn.commit()
+
+
+def fetch_films_overviews(conn) -> list[tuple[int, str]]:
+    """
+    Fetches all non-null film overviews along with their unique identifiers.
+
+    Args:
+        conn: An active psycopg database connection object.
+
+    Returns:
+        A list of tuples, where each tuple contains (film_id, overview_text).
+    """
+    with conn.cursor() as cursor:
+        cursor.execute(
+            "SELECT film_id, overview "
+            "FROM films "
+            "WHERE overview IS NOT NULL;"
+        ) 
+        return cursor.fetchall()
+
+
+def update_film_embeddings(conn, embedding_data):
+    """
+    Bulk updates the database with generated vector embeddings for each film.
+
+    Utilizes executemany to efficiently update multiple rows in a single 
+    transaction and automatically commits the changes to the database.
+
+    Args:
+        conn: An active psycopg database connection object.
+        embedding_data: A list of tuples formatted as (embedding_vector, film_id).
+    """
+    with conn.cursor() as cursor:
+        cursor.executemany(
+            "UPDATE films " 
+            "SET embedding = %s "
+            "WHERE film_id = %s;", embedding_data
+        )
+
+    conn.commit()
