@@ -1,3 +1,5 @@
+CREATE EXTENSION IF NOT EXISTS vector;
+
 CREATE TABLE IF NOT EXISTS films (
     film_id INT PRIMARY KEY,              
     title TEXT NOT NULL,
@@ -5,5 +7,6 @@ CREATE TABLE IF NOT EXISTS films (
     keywords JSONB,                       
     overview TEXT,                        
     release_date DATE,                   
-    vote_average NUMERIC(3, 1) DEFAULT 0.0
+    vote_average NUMERIC(3, 1) DEFAULT 0.0,
+    embedding vector(384)
 );
