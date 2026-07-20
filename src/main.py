@@ -3,7 +3,8 @@ from src.data.loader import (
     init_db, 
     load_data_to_db,
     fetch_films_overviews,
-    update_film_embeddings
+    update_film_embeddings,
+    create_index
 )
 from src.db import connection
 from src.model.embedder import MovieEmbedder
@@ -36,6 +37,10 @@ def main():
 
         # insert vectors into the "embedding" cols based on provided ids 
         update_film_embeddings(conn=conn, embedding_data=updates)
+
+        # create IVFFlat indices for embedding vectors to speed up the search
+        # use default num_of_probes = 10
+        create_index(conn=conn)
 
     connection.close_pool()
 
