@@ -89,3 +89,36 @@ def update_film_embeddings(conn, embedding_data):
         )
 
     conn.commit()
+
+
+def create_index(conn, num_of_probes: int = 10) -> None:
+    """
+    Creates an IVFFlat index on the embedding column and configures query-time probes.
+
+    IVFFlat groups all vectors into clusters using k-means at build time.
+    At search time Postgres compares the query vector against cluster centers first,
+    then only searches inside the closest clusters instead of scanning every row.
+
+    Args:
+        conn: An active psycopg database connection object.
+        num_of_probes: Number of clusters to search at query time. Higher values
+                       increase accuracy at the cost of speed. Defaults to 10,
+                       which follows the common rule of sqrt(lists) for 100 clusters.
+                       Cannot be less than 1.
+    """
+    if num_of_probes <= 0:
+            num_of_probes = 10
+
+    with conn.cursor() as cursor:
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS films_embedding_idx "
+            "ON films USING ivfflat (embedding vector_cosine_ops) "
+            "WITH (lists = 100);"
+        )
+        
+        cursor.execute(
+            "SELECT set_config('ivfflat.probes', %s, false);",
+            (str(num_of_probes),)
+        )
+    
+    conn.commit()
