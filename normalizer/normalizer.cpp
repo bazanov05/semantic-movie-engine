@@ -36,8 +36,10 @@ std::string TextNormalizer::clean(std::string& dirty_text) const{
         }
     }
 
-    // delete last space after the last word
-    clean_text.pop_back();
+    // safely delete last space after the last word
+    if (!clean_text.empty()) {
+        clean_text.pop_back();
+    }
 
     return clean_text;
 }
