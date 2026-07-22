@@ -16,6 +16,18 @@ FetchContent_Declare(
   GIT_TAG        v1.14.0 
 )
 
+# Fetch pybind11
+FetchContent_Declare(
+  pybind11
+  GIT_REPOSITORY https://github.com/pybind/pybind11.git
+  GIT_TAG        v2.12.0
+)
+FetchContent_MakeAvailable(pybind11)
+
+# Build the Python extension module
+pybind11_add_module(normalizer_python bindings.cpp)
+target_link_libraries(normalizer_python PRIVATE normalizer)
+
 # downloads and makes GTest targets available
 FetchContent_MakeAvailable(googletest)
 
