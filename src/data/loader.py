@@ -1,4 +1,5 @@
 import pandas as pd
+from psycopg.rows import dict_row
 
 
 def load_data_to_db(conn, df: pd.DataFrame) -> None:
@@ -122,3 +123,45 @@ def create_index(conn, num_of_probes: int = 10) -> None:
         )
     
     conn.commit()
+
+
+def group_by_genres(conn) -> dict[str, list[int]]:
+    """
+    Fetches all films grouped by genre from the database.
+
+    Unpacks the JSONB genres array for each film, extracts the genre name,
+    and aggregates film IDs under each genre. Genres are ordered by number
+    of films descending.
+
+    Args:
+        conn: An active psycopg database connection object.
+
+    Returns:
+        A dictionary mapping each genre name to a list of film IDs belonging to it.
+        Example: {"Action": [1, 5, 23, ...], "Comedy": [2, 8, 14, ...]}
+    """
+    with conn.cursor() as cursor:
+        cursor.row_factory = dict_row
+
+        cursor.execute(
+            "WITH expanded_json AS(" 
+            "   SELECT film_id, genre FROM films " 
+            "   CROSS JOIN jsonb_array_elements(genres) AS genre" 
+            "), " 
+            "   expanded_genre AS(" 
+            "   SELECT " 
+            "       film_id, " 
+            "       genre ->> 'name' AS genre_name " 
+            "   FROM expanded_json" 
+            ") " 
+            "SELECT " 
+            "   genre_name, " 
+            "   ARRAY_AGG(film_id ORDER BY film_id) AS movies " 
+            "FROM expanded_genre " 
+            "GROUP BY genre_name " 
+            "ORDER BY COUNT(film_id) DESC;"
+        )
+
+        results = cursor.fetchall()
+        return {row["genre_name"]: row["movies"] for row in results}
+    
