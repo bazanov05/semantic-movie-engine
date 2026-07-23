@@ -224,4 +224,24 @@ def build_distance_matrix(conn) -> dict[int, dict[int, float]]:
                 distance_matrix[id1][id2] = cosine_distances[i][j]
 
         return distance_matrix
- 
+
+
+def fetch_films_embeddings(conn) -> dict[int, list[float]]:
+    """
+    Fetch embeddings for all films from the database.
+
+    Args:
+        conn: An active PostgreSQL database connection.
+
+    Returns:
+        A dictionary mapping each film ID to its embedding vector.
+    """
+    with conn.cursor() as cursor:
+        cursor.row_factory = dict_row
+
+        cursor.execute(
+            "SELECT film_id, embedding FROM films "
+            "ORDER BY film_id;"
+        )
+
+        return {row["film_id"]: row["embedding"] for row in cursor.fetchall()}
