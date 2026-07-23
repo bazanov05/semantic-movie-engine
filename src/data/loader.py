@@ -1,5 +1,6 @@
 import pandas as pd
 from psycopg.rows import dict_row
+import numpy as np
 
 
 def load_data_to_db(conn, df: pd.DataFrame) -> None:
@@ -164,4 +165,63 @@ def group_by_genres(conn) -> dict[str, list[int]]:
 
         results = cursor.fetchall()
         return {row["genre_name"]: row["movies"] for row in results}
-    
+
+
+def build_distance_matrix(conn) -> dict[int, dict[int, float]]:
+    """
+    Builds a pairwise cosine distance matrix for all films with embeddings.
+
+    Fetches all film embeddings from the database, normalizes them to unit length
+    so cosine similarity reduces to a dot product, then computes all pairwise
+    distances in one matrix multiplication. Used by FilmPairDataset to efficiently
+    sample semi-hard negatives during training without querying the database
+    on every batch.
+
+    Args:
+        conn: An active psycopg database connection object.
+
+    Returns:
+        A nested dictionary mapping each film_id to a dict of all other film_ids
+        and their cosine distances. Example: {1: {2: 0.3, 3: 0.7, ...}, ...}
+        Distance of 0 means identical, 2 means opposite.
+    """
+    with conn.cursor() as cursor:
+        cursor.execute(
+            "SELECT " 
+            "   film_id, " 
+            "   embedding " 
+            "FROM films " 
+            "ORDER BY film_id ASC;"
+        )
+
+        result = cursor.fetchall()  # result is list of tuples(film_id, embedding)
+
+        # unzip result
+        ids, embeddings = map(np.array, zip(*result))
+
+        # for each vector calculate the norm
+        norms = np.linalg.norm(
+            embeddings,
+            axis=1,
+            keepdims=True
+        )
+
+        # normalize every vector, so the length of every vector is 1
+        # in this case cosine similarity = dot product because lenghtes of vectors are 1
+        normalized_embeddings = embeddings / norms
+
+        # get the similarities between vectors (1000, 384) @ (384, 1000) = (1000, 1000)
+        similarities = normalized_embeddings @ normalized_embeddings.T
+        cosine_distances = np.subtract(1, similarities) # cosine_distace = 1 - cosine_similarity
+
+        distance_matrix = {}
+
+        # build a result dict - {id1: {id2: distance}}
+        for i, id1 in enumerate(ids):
+            distance_matrix[id1] = {}
+
+            for j, id2 in enumerate(ids):
+                distance_matrix[id1][id2] = cosine_distances[i][j]
+
+        return distance_matrix
+ 
