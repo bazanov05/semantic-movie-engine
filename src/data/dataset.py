@@ -30,6 +30,7 @@ class FilmPairDataset(Dataset):
             self, 
             matrix_distances: dict[int, dict[int, float]], 
             genres: dict[str, list[int]],
+            keywords: dict[str, list[int]],
             embeddings: dict[int, list[float]],
             margin: float = 0.2
         ):
@@ -37,6 +38,7 @@ class FilmPairDataset(Dataset):
 
         self._matrix_distances = matrix_distances
         self._genres = genres
+        self._keywords = keywords
         self._embeddings = embeddings
 
         # distance between pos and anchor should be smaller than distance between neg and anchor
@@ -48,118 +50,88 @@ class FilmPairDataset(Dataset):
         # so we need to map those indices to real film_ids
         self._films_ids = list(embeddings.keys())
 
+    def _compute_similarity_scores(self) -> dict[int, dict[int, int]]:
+        """
+        Precomputes weighted similarity scores for every pair of films.
+
+        Builds inverted indexes mapping each film to its genre and keyword sets,
+        then computes a weighted score for every pair using set intersection.
+        Genres are weighted higher than keywords as they are a stronger categorical signal.
+
+        Score formula: (2 * shared_genres) + (1 * shared_keywords)
+
+        Returns:
+            A nested dictionary mapping each film_id to a dict of all other film_ids
+            and their similarity scores. Example: {1: {2: 5, 3: 1, ...}, ...}
+        """
+        # for each film_id find it's genres, build a dict - film_id: set of genres
+        film_genres: dict[int, set[str]] = defaultdict(set)
+
+        for genre, ids in self._genres.items():
+            for film_id in ids:
+                film_genres[film_id].add(genre)
+
+        # for each film find it's keywords
+        film_keywords: dict[int, set[str]] = defaultdict(set)
+
+        for keyword, ids in self._keywords.items():
+            for film_id in ids:
+                film_keywords[film_id].add(keyword)
+
+        # create dict of scores for each pair of ids
+        scores: dict[int, dict[int, float]] = {}
+
+        for id1 in self._films_ids:
+            scores[id1] = {}
+            for id2 in self._films_ids:
+                if id1 != id2:
+                    # find how many genres and keywords those films have in common
+                    genre_similariy = len(film_genres[id1] & film_genres[id2])
+                    keyword_similarity = len(film_keywords[id1] & film_keywords[id2])
+
+                    # calculate the weighted score, genre has weight 2, keyword 1
+                    score = genre_similariy * 2 + keyword_similarity
+                    scores[id1][id2] = score
+
+        return scores
+
+    def _build_candidate_lists(
+            self, 
+            scores: dict[int, dict[int, int]]
+        ) -> tuple[dict[int, list[int]], dict[int, list[int]]]:
+        """
+        Splits all film pairs into positive and negative candidate lists based on similarity score.
+
+        A film is a positive candidate if its weighted similarity score with the anchor
+        is 4 or above — equivalent to sharing 2 genres, or 1 genre and 2 keywords.
+        All other films are treated as negative candidates.
+
+        Args:
+            scores: Precomputed similarity scores from _compute_similarity_scores.
+
+        Returns:
+            A tuple of (positives, negatives), each a dict mapping film_id to a list
+            of candidate film_ids. Example: {1: [5, 23, 104], ...}
+        """
+        # build positive and negative candidates
+        positives = defaultdict(list)
+        negatives = defaultdict(list)
+
+        for id1 in self._films_ids:
+            for id2 in self._films_ids:
+                if id1 != id2:
+                    score = scores[id1][id2]
+                    # if score >= 4 - this candidate is considered positive
+                    if score >= 4:
+                        positives[id1].append(id2)
+                    # otherwise - negative 
+                    else:
+                        negatives[id1].append(id2)
+
+        return positives, negatives
+
     def __len__(self):
         """Returns the total number of films in the dataset."""
         return len(self._embeddings)
 
-    def __getitem__(self, index) -> tuple[list[float], list[float] | None, list[float] | None]:
-        """
-        Returns a triplet of embeddings for the film at the given index.
-
-        Maps DataLoader's sequential index to a real film_id, then samples
-        a positive and negative candidate using semi-hard → hard → easy fallback.
-        Returns None for positive and negative if no valid candidates exist,
-        which should be handled by a custom collate_fn in the DataLoader.
-
-        Args:
-            index: DataLoader's sequential index in range [0, len(dataset) - 1].
-
-        Returns:
-            A tuple of (anchor, positive, negative) embedding vectors.
-            Positive and negative may be None if no valid candidates were found.
-        """
-        film_id = self._films_ids[index] # map DataLoader's index to film_id
-
-        anchor = self._embeddings[film_id]  # get embedding vector for anchor
-
-        # get positive and negative candidates for anchor
-        positives, negatives = self._find_positives_and_negatives(film_id=film_id)
-
-        # if some group is empty - skip the backward step
-        if not positives or not negatives:
-            return anchor, None, None
-
-        # shuffle lists so we do not get the same movies every time 
-        np.random.shuffle(positives)
-        np.random.shuffle(negatives)
-
-        # in case the semi-hard logic is not found use hard logic
-        # condition : d_neg < d_pos
-        best_hard_positive = None
-        best_hard_negative = None
-
-        # semi-hard logic: if the d_neg is bigger than d_pos but not by margin - return this case
-        for positive_id in positives:
-            d_pos = self._matrix_distances[film_id][positive_id]
-            positive = self._embeddings[positive_id]
-
-            for negative_id in negatives:
-                negative = self._embeddings[negative_id]
-                d_neg = self._matrix_distances[film_id][negative_id]
-
-                # check if the semi-hard condition passed 
-                if d_pos < d_neg and d_neg < d_pos + self._margin:
-                    return anchor, positive, negative
-
-                # hard logic, check witihin semi-hard logic not to run nested loop twice
-                if d_neg < d_pos:
-                    best_hard_negative = negative
-                    best_hard_positive = positive
-
-        if best_hard_positive is not None and best_hard_negative is not None:
-            return anchor, best_hard_positive, best_hard_negative
-        
-        # easy logic: return random pos and random neg vectors
-        # the weakest approach, becuase majority of negatives are already further than positives
-        random_positive_id = np.random.choice(positives)
-        random_negative_id = np.random.choice(negatives)
-
-        random_positive = self._embeddings[random_positive_id]
-        random_negative = self._embeddings[random_negative_id]
-
-        return anchor, random_positive, random_negative
-
-
-    def _find_positives_and_negatives(self, film_id: int) -> tuple[list[int], list[int]]:
-        """
-        Finds positive and negative candidate film IDs for a given anchor film.
-
-        A film is considered a positive candidate if it shares 2 or more genres
-        with the anchor — a stricter threshold than single genre overlap to ensure
-        meaningful similarity signal. All other films are treated as negative candidates.
-
-        Args:
-            film_id: The anchor film ID to find candidates for.
-
-        Returns:
-            A tuple of (positives, negatives) where each is a list of film IDs.
-            The anchor film itself is excluded from both lists.
-        """
-        positive_genres = set()
-
-        # find which genres has input film_id 
-        for genre, ids in self._genres.items():
-            if film_id in ids:
-                positive_genres.add(genre)
-
-        num_of_genres_in_common = defaultdict(int)
-
-        # create a dict of similiraties - increase if the curr film has genre in common with the input's one
-        for genre, ids in self._genres.items():
-            if genre in positive_genres:
-                for id in ids:
-                    num_of_genres_in_common[id] += 1
-
-        positives = []
-        negatives = []
-
-        for id in self._films_ids:
-            if id != film_id:
-                # if film has 2 or more genres in common - it is positive
-                if num_of_genres_in_common[id] >= 2:
-                    positives.append(id)
-                # otherwise - negative
-                else:
-                    negatives.append(id)
-
-        return positives, negatives
+    
