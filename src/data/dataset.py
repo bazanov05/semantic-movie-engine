@@ -1,6 +1,7 @@
 from torch.utils.data import Dataset
 from collections import defaultdict
 import numpy as np
+import torch
 
 
 class FilmPairDataset(Dataset):
@@ -216,4 +217,33 @@ class FilmPairDataset(Dataset):
         """
         return self._sample_triplet(index=index)
 
-    
+
+def custom_collate_fn(triplets: list[tuple[list[float], list[float] | None, list[float] | None]]) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """
+    Custom DataLoader collate function that filters invalid triplets and stacks valid ones into tensors.
+
+    Replaces DataLoader's default collate which crashes on None values. Filters out any
+    triplets where positive or negative is None — cases where FilmPairDataset found no
+    valid candidates for an anchor. Stacks remaining valid triplets into three batched tensors.
+
+    Args:
+        triplets: A list of raw samples from FilmPairDataset.__getitem__, each a tuple of
+                  (anchor, positive, negative) where positive and negative may be None.
+
+    Returns:
+        A tuple of (anchors, positives, negatives) tensors each of shape (batch_size, 384).
+        Returns three empty tensors of shape (0, 384) if no valid triplets exist in the batch.
+    """
+    # clean triplet - delete those where positive and negative where not found
+    cleaned_triplets = [triplet for triplet in triplets if triplet[1] is not None and triplet[2] is not None]
+
+    # if no triplets are left after the clean - return 3 empty tensors
+    if not cleaned_triplets:
+        return torch.empty(0, 384), torch.empty(0, 384), torch.empty(0, 384)
+
+    # otherwise return 3 tensors: anchors, positives and negatives 
+    anchors = torch.tensor(data=[triplet[0] for triplet in cleaned_triplets])
+    positives = torch.tensor(data=[triplet[1] for triplet in cleaned_triplets])
+    negatives = torch.tensor(data=[triplet[2] for triplet in cleaned_triplets])
+
+    return anchors, positives, negatives
