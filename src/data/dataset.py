@@ -50,6 +50,9 @@ class FilmPairDataset(Dataset):
         # so we need to map those indices to real film_ids
         self._films_ids = list(embeddings.keys())
 
+        similarity_scores = self._compute_similarity_scores()
+        self._positives, self._negatives = self._build_candidate_lists(scores=similarity_scores)
+
     def _compute_similarity_scores(self) -> dict[int, dict[int, int]]:
         """
         Precomputes weighted similarity scores for every pair of films.
@@ -130,8 +133,87 @@ class FilmPairDataset(Dataset):
 
         return positives, negatives
 
+    def _sample_triplet(self, index: int) -> tuple[list[float], list[float] | None, list[float] | None]:
+        """
+        Samples a triplet of embeddings for the film at the given index.
+
+        Applies a sampling hierarchy to find the most informative triplet:
+        1. Semi-hard: d_pos < d_neg < d_pos + margin. Best learning signal.
+        2. Hard: d_neg < d_pos. Strong signal, used as fallback.
+        3. Easy: random positive and negative. Weakest signal, last resort.
+
+        Args:
+            index: DataLoader's sequential index mapped to a real film_id.
+
+        Returns:
+            A tuple of (anchor, positive, negative) embedding vectors.
+            Positive and negative are None if no valid candidates exist.
+        """
+        film_id = self._films_ids[index]    # map index to film_id 
+        anchor = self._embeddings[film_id]
+
+        # get positive and negative candidates for anchor
+        positives = self._positives[film_id]
+        negatives = self._negatives[film_id]
+
+        # if anchor is lack of some candidates - return Nones
+        if not positives or not negatives:
+            return anchor, None, None
+
+        # shuffle ids
+        np.random.shuffle(positives)
+        np.random.shuffle(negatives)
+
+        # track best case for hard logic in case semi-hard is not found
+        best_hard_pos = None
+        best_hard_neg = None
+
+        for positive_id in positives:
+            positive = self._embeddings[positive_id]
+            for negative_id in negatives:
+                negative = self._embeddings[negative_id]
+
+                d_pos = self._matrix_distances[film_id][positive_id]
+                d_neg = self._matrix_distances[film_id][negative_id]
+
+                # semi-hard logic: d_pos is smaller than d_neg but not by margin
+                if d_pos < d_neg and d_neg < d_pos + self._margin:
+                    return anchor, positive, negative
+
+                # hard logic: d_pos > d_neg
+                if d_neg < d_pos:
+                    best_hard_neg = negative
+                    best_hard_pos = positive
+
+        # return hard vectors in case semi-hard was not found and hard was found
+        if best_hard_pos is not None and best_hard_neg is not None:
+            return anchor, best_hard_pos, best_hard_neg
+
+        # otherwise, use easy logic - return random positive and random negative
+        random_pos_id = np.random.choice(positives)
+        random_neg_id = np.random.choice(negatives)
+
+        positive = self._embeddings[random_pos_id]
+        negative = self._embeddings[random_neg_id]
+
+        return anchor, positive, negative
+
     def __len__(self):
         """Returns the total number of films in the dataset."""
         return len(self._embeddings)
+
+    def __getitem__(self, index) -> tuple[list[float], list[float] | None, list[float] | None]:
+        """
+        Returns a sampled triplet for the given index.
+
+        Delegates to _sample_triplet. Called by DataLoader on every batch iteration.
+
+        Args:
+            index: Sequential index provided by DataLoader in range [0, len(dataset) - 1].
+
+        Returns:
+            A tuple of (anchor, positive, negative) embedding vectors.
+        """
+        return self._sample_triplet(index=index)
 
     
