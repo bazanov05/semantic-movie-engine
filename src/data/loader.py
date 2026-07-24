@@ -245,3 +245,57 @@ def fetch_films_embeddings(conn) -> dict[int, list[float]]:
         )
 
         return {row["film_id"]: row["embedding"] for row in cursor.fetchall()}
+
+
+def group_by_keywords(conn, max_frequency: int = 200) -> dict[str, list[int]]:
+    """
+    Fetches films grouped by keyword from the database, filtering out overly common keywords.
+
+    Unpacks the JSONB keywords array for each film, extracts the keyword name, and
+    aggregates film IDs. Keywords that appear in `max_frequency` or more films are
+    filtered out to remove generic noise (acting as an IDF/stop-word filter) and keep
+    only high-signal, specific keywords.
+
+    Args:
+        conn: An active psycopg database connection object.
+        max_frequency (int, optional): The maximum number of films a keyword can belong
+                                       to before it is dropped as too generic.
+                                       Defaults to 200.
+
+    Returns:
+        A dictionary mapping each filtered keyword name to a list of film IDs.
+        Example: {"alien planet": [1, 23, 104], "space war": [1, 58]}
+    """
+    with conn.cursor() as cursor:
+        cursor.row_factory = dict_row
+
+        cursor.execute(
+            "WITH expanded_json AS(" 
+            "   SELECT film_id, keyword FROM films " 
+            "   CROSS JOIN jsonb_array_elements(keywords) AS keyword" 
+            "), " 
+            "   expanded_keyword AS(" 
+            "   SELECT " 
+            "       film_id, " 
+            "       keyword ->> 'name' AS keyword_name " 
+            "   FROM expanded_json" 
+            ") " 
+            "SELECT " 
+            "   keyword_name, " 
+            "   ARRAY_AGG(film_id ORDER BY film_id) AS movies " 
+            "FROM expanded_keyword " 
+            "GROUP BY keyword_name " 
+            "ORDER BY COUNT(film_id) DESC;"
+                )
+
+        results = cursor.fetchall()
+
+        # we want to save only keywords which appear in less than 200 films
+        # cause they are not noisy and carry semantic sense 
+        filtered_results = {
+            row["keyword_name"]: row["movies"] 
+            for row in results 
+            if len(row["movies"]) < max_frequency
+        }
+
+        return filtered_results
