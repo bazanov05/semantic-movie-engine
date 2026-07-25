@@ -299,3 +299,66 @@ def group_by_keywords(conn, max_frequency: int = 200) -> dict[str, list[int]]:
         }
 
         return filtered_results
+
+
+def fetch_films_semantic_meaning(conn) -> list[tuple[int, str, str, str]]:
+    """
+    Fetches film metadata needed to generate rich semantic embeddings.
+
+    Unpacks the JSONB genres and keywords arrays for each film, aggregates them
+    into space-separated strings, and joins with the overview. The resulting
+    text fields can be concatenated to form a rich input for the embedding model,
+    providing more signal than overview alone.
+
+    Only films with both genres and keywords are returned due to INNER JOIN —
+    films missing either field are excluded.
+
+    Args:
+        conn: An active psycopg database connection object.
+
+    Returns:
+        A list of tuples (film_id, overview, genres, keywords) ordered by film_id.
+        Example: [(1, "A story about...", "Action Sci-Fi", "alien space battle"), ...]
+    """
+    with conn.cursor() as cursor:
+        cursor.execute(
+            "WITH unpacked_json_genres AS ("
+            "    SELECT film_id, jsonb_array_elements(genres) AS genre "
+            "    FROM films"
+            "), "
+            "unpacked_genres AS ("
+            "    SELECT film_id, genre ->> 'name' AS genre_name "
+            "    FROM unpacked_json_genres"
+            "), "
+            "grouped_genres AS ("
+            "    SELECT film_id, string_agg(genre_name, ' ') AS genres "
+            "    FROM unpacked_genres "
+            "    GROUP BY film_id"
+            "), "
+            "unpacked_json_keywords AS ("
+            "    SELECT film_id, jsonb_array_elements(keywords) AS keyword "
+            "    FROM films"
+            "), "
+            "unpacked_keywords AS ("
+            "    SELECT film_id, keyword ->> 'name' AS keyword_name "
+            "    FROM unpacked_json_keywords"
+            "), "
+            "grouped_keywords AS ("
+            "    SELECT film_id, string_agg(keyword_name, ' ') AS keywords "
+            "    FROM unpacked_keywords "
+            "    GROUP BY film_id"
+            ") "
+            "SELECT "
+            "    f.film_id, "
+            "    f.overview, "
+            "    g.genres, "
+            "    k.keywords "
+            "FROM films AS f "
+            "INNER JOIN grouped_genres AS g "
+            "    ON f.film_id = g.film_id "
+            "INNER JOIN grouped_keywords AS k "
+            "    ON f.film_id = k.film_id "
+            "ORDER BY f.film_id;"
+        )
+
+        return cursor.fetchall()
