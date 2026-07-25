@@ -53,26 +53,7 @@ def init_db(conn, schema_path: str = "src/db/schema.sql") -> None:
     conn.commit()
 
 
-def fetch_films_overviews(conn) -> list[tuple[int, str]]:
-    """
-    Fetches all non-null film overviews along with their unique identifiers.
-
-    Args:
-        conn: An active psycopg database connection object.
-
-    Returns:
-        A list of tuples, where each tuple contains (film_id, overview_text).
-    """
-    with conn.cursor() as cursor:
-        cursor.execute(
-            "SELECT film_id, overview "
-            "FROM films "
-            "WHERE overview IS NOT NULL;"
-        ) 
-        return cursor.fetchall()
-
-
-def update_film_embeddings(conn, embedding_data):
+def update_film_embeddings(conn, embedding_data, column: str = "embedding") -> None:
     """
     Bulk updates the database with generated vector embeddings for each film.
 
@@ -82,18 +63,19 @@ def update_film_embeddings(conn, embedding_data):
     Args:
         conn: An active psycopg database connection object.
         embedding_data: A list of tuples formatted as (embedding_vector, film_id).
+        column: A name of embedding column, which should be updated.
     """
     with conn.cursor() as cursor:
         cursor.executemany(
             "UPDATE films " 
-            "SET embedding = %s "
+            f"SET {column} = %s "
             "WHERE film_id = %s;", embedding_data
         )
 
     conn.commit()
 
 
-def create_index(conn, num_of_probes: int = 10) -> None:
+def create_index(conn, num_of_probes: int = 10, column: str = "embedding") -> None:
     """
     Creates an IVFFlat index on the embedding column and configures query-time probes.
 
@@ -107,14 +89,20 @@ def create_index(conn, num_of_probes: int = 10) -> None:
                        increase accuracy at the cost of speed. Defaults to 10,
                        which follows the common rule of sqrt(lists) for 100 clusters.
                        Cannot be less than 1.
+        column: A name of embedding column, for which the IVFFlat index should be created.
     """
     if num_of_probes <= 0:
             num_of_probes = 10
 
+    if column == "embedding":
+        index_name = "pretrained_embedding_idx"
+    else:
+        index_name = "finetuned_embedding_idx"
+
     with conn.cursor() as cursor:
         cursor.execute(
-            "CREATE INDEX IF NOT EXISTS films_embedding_idx "
-            "ON films USING ivfflat (embedding vector_cosine_ops) "
+            f"CREATE INDEX IF NOT EXISTS {index_name} "
+            f"ON films USING ivfflat ({column} vector_cosine_ops) "
             "WITH (lists = 100);"
         )
         
@@ -167,7 +155,7 @@ def group_by_genres(conn) -> dict[str, list[int]]:
         return {row["genre_name"]: row["movies"] for row in results}
 
 
-def build_distance_matrix(conn) -> dict[int, dict[int, float]]:
+def build_distance_matrix(conn, column: str = "embedding") -> dict[int, dict[int, float]]:
     """
     Builds a pairwise cosine distance matrix for all films with embeddings.
 
@@ -179,6 +167,7 @@ def build_distance_matrix(conn) -> dict[int, dict[int, float]]:
 
     Args:
         conn: An active psycopg database connection object.
+        column: name of embedding column.
 
     Returns:
         A nested dictionary mapping each film_id to a dict of all other film_ids
@@ -189,7 +178,7 @@ def build_distance_matrix(conn) -> dict[int, dict[int, float]]:
         cursor.execute(
             "SELECT " 
             "   film_id, " 
-            "   embedding " 
+            f"   {column} " 
             "FROM films " 
             "ORDER BY film_id ASC;"
         )
@@ -226,7 +215,7 @@ def build_distance_matrix(conn) -> dict[int, dict[int, float]]:
         return distance_matrix
 
 
-def fetch_films_embeddings(conn) -> dict[int, list[float]]:
+def fetch_films_embeddings(conn, column: str = "embedding") -> dict[int, list[float]]:
     """
     Fetch embeddings for all films from the database.
 
@@ -240,11 +229,11 @@ def fetch_films_embeddings(conn) -> dict[int, list[float]]:
         cursor.row_factory = dict_row
 
         cursor.execute(
-            "SELECT film_id, embedding FROM films "
+            f"SELECT film_id, {column} FROM films "
             "ORDER BY film_id;"
         )
 
-        return {row["film_id"]: row["embedding"] for row in cursor.fetchall()}
+        return {row["film_id"]: row[f"{column}"] for row in cursor.fetchall()}
 
 
 def group_by_keywords(conn, max_frequency: int = 200) -> dict[str, list[int]]:
