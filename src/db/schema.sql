@@ -8,5 +8,6 @@ CREATE TABLE IF NOT EXISTS films (
     overview TEXT,                        
     release_date DATE,                   
     vote_average NUMERIC(3, 1) DEFAULT 0.0,
-    embedding vector(384)
+    embedding vector(384),
+    embedding_finetuned vector(128)
 );
