@@ -60,8 +60,9 @@ def main(args):
         if os.path.exists(path=PATH_TO_MODEL_WEIGHTS):
             model = FilmEncoder.load(path=PATH_TO_MODEL_WEIGHTS)
         else:
-            # otherwise - create model with random weights in Projection Layer
-            model = FilmEncoder()
+            # otherwise raise NotImplementedError 
+            # so the model with random weights in Projection Layer will not be created
+            raise FileNotFoundError("Model was not trained - run 'train.py'")
     
         column = "embedding_finetuned"
 
