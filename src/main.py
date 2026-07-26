@@ -1,49 +1,102 @@
-from src.data.cleaner import clean_data
+from argparse import ArgumentParser
+import sys
+import os
+
+from normalizer import TextNormalizer
 from src.data.loader import (
-    init_db, 
-    load_data_to_db,
-    fetch_films_overviews,
     update_film_embeddings,
-    create_index
+    create_index,
+    fetch_films_semantic_meaning,
 )
 from src.db import connection
 from src.model.embedder import MovieEmbedder
+from src.model.film_encoder import FilmEncoder
 
 
-PATH_TO_CSV_DATA = "./src/data/tmdb_5000_movies.csv"
-PATH_TO_SQL_SCHEMA = "./src/db/schema.sql"
+PATH_TO_STOP_WORDS = "./normalizer/data/stopwords.txt"
+PATH_TO_MODEL_WEIGHTS = "./src/model/data/weights.pt"
 
 
-def main():
+def fetch_stop_words(path: str = PATH_TO_STOP_WORDS) -> set[str]:
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            stop_words = set()
+
+            for line in f:
+                cleaned_word = line.strip()
+
+                if cleaned_word:
+                    stop_words.add(cleaned_word)
+
+            return stop_words
+    except FileNotFoundError:
+        raise FileNotFoundError(f"Path {path} does not exist")
+    except IsADirectoryError:
+        raise IsADirectoryError("You are trying to open the dir, not file")
+    except PermissionError:
+        raise PermissionError("You do not have permission to open this file")
+
+
+def main(args):
+    parser = ArgumentParser()
+
+    parser.add_argument(
+        "--model",
+        default="pretrained"
+    )
+
+    arguments = parser.parse_args(args=args[1:])
+
+    # init pool to get connection
     connection.init_pool()
 
-    clean_df = clean_data(file_path=PATH_TO_CSV_DATA)
-    model = MovieEmbedder()
+    # if --model argument was not given - use pretrained model from HuggingFace
+    # otherwise used finetuned model with extra Projection Layer
+    if arguments.model == "pretrained":
+        model = MovieEmbedder()
+        column = "embedding"
+    else:
+        # try to load trained model's weights
+        if os.path.exists(path=PATH_TO_MODEL_WEIGHTS):
+            model = FilmEncoder.load(path=PATH_TO_MODEL_WEIGHTS)
+        else:
+            # otherwise - create model with random weights in Projection Layer
+            model = FilmEncoder()
+    
+        column = "embedding_finetuned"
+
+    # fetch stop words and crate text normalizer
+    stop_words = fetch_stop_words()
+    text_normalizer = TextNormalizer(stop_words)
 
     with connection.pool.connection() as conn:
-        init_db(conn=conn, schema_path=PATH_TO_SQL_SCHEMA)
-        load_data_to_db(conn=conn, df=clean_df)
+        films_info = fetch_films_semantic_meaning(conn=conn)
 
-        # fetch film_ids and overviews from films table 
-        data = fetch_films_overviews(conn=conn)
+        ids, overviews, genres, keywords = zip(*films_info)
 
-        # unzip data
-        ids = [item[0] for item in data]
-        overviews = [item[1] for item in data]
+        # enrich overviews with genres and keywords
+        rich_overviews = [
+            f"overview {overviews[i]} "
+            f"genre {genres[i]} "
+            f"keywords {keywords[i]} "
+            for i in range(len(ids))
+        ]
 
-        # generate vector representation for each overview
-        vectors = model.generate_embeddings(texts=overviews)
-        updates = list(zip(vectors, ids))   # zip data 
+        # delete stop words from overviews with text normalizer
+        rich_overviews = [text_normalizer.clean(rich_overview) for rich_overview in rich_overviews]
 
-        # insert vectors into the "embedding" cols based on provided ids 
-        update_film_embeddings(conn=conn, embedding_data=updates)
+        # generate embeddings for films and store them in db
+        vectors = model.generate_embeddings(texts=rich_overviews)
+        updates = list(zip(vectors, ids))
+        update_film_embeddings(conn=conn, embedding_data=updates, column=column)
 
-        # create IVFFlat indices for embedding vectors to speed up the search
-        # use default num_of_probes = 10
-        create_index(conn=conn)
+        # create IVFFlat indices for newly created vectors 
+        # with default probes = 10
+        create_index(conn=conn, column=column)
+
 
     connection.close_pool()
 
 
 if __name__ == "__main__":
-    main()
+    main(sys.argv)
