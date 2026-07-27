@@ -5,7 +5,7 @@
 namespace py = pybind11;
 
 // (compiled file, C++ obj)
-PYBIND11_MODULE(normalizer, m) {
+PYBIND11_MODULE(normalizer_python, m) {
     py::class_<TextNormalizer>(m, "TextNormalizer")
         // provide types for constructor since there is not pointer to it 
         .def(py::init<const std::unordered_set<std::string>>(), py::arg("stop_words"))
