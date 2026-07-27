@@ -2,7 +2,7 @@ from argparse import ArgumentParser
 import sys
 import os
 
-from normalizer import TextNormalizer
+from normalizer_python import TextNormalizer
 from src.data.loader import (
     update_film_embeddings,
     create_index,
@@ -38,6 +38,17 @@ def fetch_stop_words(path: str = PATH_TO_STOP_WORDS) -> set[str]:
 
 
 def main(args):
+    """
+    Generates and stores film embeddings into the database.
+
+    Parses CLI arguments to select either a pretrained or fine-tuned model. 
+    Retrieves semantic film metadata, cleans rich overviews via C++ TextNormalizer, 
+    generates vector representations, bulk updates PostgreSQL, and builds 
+    an IVFFlat vector index for fast similarity search.
+
+    Args:
+        args: Command-line argument list (typically sys.argv).
+    """
     parser = ArgumentParser()
 
     parser.add_argument(
@@ -66,7 +77,7 @@ def main(args):
     
         column = "embedding_finetuned"
 
-    # fetch stop words and crate text normalizer
+    # fetch stop words and create text normalizer
     stop_words = fetch_stop_words()
     text_normalizer = TextNormalizer(stop_words)
 
