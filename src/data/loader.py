@@ -1,4 +1,5 @@
 import pandas as pd
+import json
 from psycopg.rows import dict_row
 import numpy as np
 
@@ -180,13 +181,25 @@ def build_distance_matrix(conn, column: str = "embedding") -> dict[int, dict[int
             "   film_id, " 
             f"   {column} " 
             "FROM films " 
+            f"WHERE {column} IS NOT NULL " 
             "ORDER BY film_id ASC;"
         )
 
         result = cursor.fetchall()  # result is list of tuples(film_id, embedding)
 
-        # unzip result
-        ids, embeddings = map(np.array, zip(*result))
+        if not result:
+            raise ValueError(f"No embeddings found in column '{column}'. Run main.py first.")
+
+        # Postgres might return embeddings as strings
+        # so we cannot directly map them to np.array
+        ids = [row[0] for row in result]
+        raw_embeddings = [row[1] for row in result]
+
+        # parse string representation into float matrix
+        if isinstance(raw_embeddings[0], str):
+            embeddings = np.array([json.loads(vec) for vec in raw_embeddings], dtype=np.float32)
+        else:
+            embeddings = np.array(raw_embeddings, dtype=np.float32)
 
         # for each vector calculate the norm
         norms = np.linalg.norm(
@@ -230,10 +243,22 @@ def fetch_films_embeddings(conn, column: str = "embedding") -> dict[int, list[fl
 
         cursor.execute(
             f"SELECT film_id, {column} FROM films "
+            f"WHERE {column} IS NOT NULL "
             "ORDER BY film_id;"
         )
+        
+        results = cursor.fetchall()
+        
+        embeddings_dict = {}
+        for row in results:
+            raw_vec = row[f"{column}"]
+            # parse string representation into list of floats
+            if isinstance(raw_vec, str):
+                embeddings_dict[row["film_id"]] = json.loads(raw_vec)
+            else:
+                embeddings_dict[row["film_id"]] = list(raw_vec)
 
-        return {row["film_id"]: row[f"{column}"] for row in cursor.fetchall()}
+        return embeddings_dict
 
 
 def group_by_keywords(conn, max_frequency: int = 200) -> dict[str, list[int]]:
@@ -343,9 +368,9 @@ def fetch_films_semantic_meaning(conn) -> list[tuple[int, str, str, str]]:
             "    g.genres, "
             "    k.keywords "
             "FROM films AS f "
-            "INNER JOIN grouped_genres AS g "
+            "LEFT JOIN grouped_genres AS g "
             "    ON f.film_id = g.film_id "
-            "INNER JOIN grouped_keywords AS k "
+            "LEFT JOIN grouped_keywords AS k "
             "    ON f.film_id = k.film_id "
             "ORDER BY f.film_id;"
         )
