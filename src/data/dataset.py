@@ -62,7 +62,7 @@ class FilmPairDataset(Dataset):
         then computes a weighted score for every pair using set intersection.
         Genres are weighted higher than keywords as they are a stronger categorical signal.
 
-        Score formula: (2 * shared_genres) + (1 * shared_keywords)
+        Score formula: (2.0 * shared_genres) + (1.0 * shared_keywords)
 
         Returns:
             A nested dictionary mapping each film_id to a dict of all other film_ids
@@ -90,11 +90,11 @@ class FilmPairDataset(Dataset):
             for id2 in self._films_ids:
                 if id1 != id2:
                     # find how many genres and keywords those films have in common
-                    genre_similariy = len(film_genres[id1] & film_genres[id2])
+                    genre_similarity = len(film_genres[id1] & film_genres[id2])
                     keyword_similarity = len(film_keywords[id1] & film_keywords[id2])
 
-                    # calculate the weighted score, genre has weight 2, keyword 1
-                    score = genre_similariy * 2 + keyword_similarity
+                    # calculate the weighted score, genre has weight 2.0, keyword 1.0
+                    score = (genre_similarity * 1.5) + (keyword_similarity * 1.0)
                     scores[id1][id2] = score
 
         return scores
@@ -122,15 +122,22 @@ class FilmPairDataset(Dataset):
         negatives = defaultdict(list)
 
         for id1 in self._films_ids:
-            for id2 in self._films_ids:
-                if id1 != id2:
-                    score = scores[id1][id2]
-                    # if score >= 4 - this candidate is considered positive
-                    if score >= 4:
-                        positives[id1].append(id2)
-                    # otherwise - negative 
-                    else:
-                        negatives[id1].append(id2)
+            # sort by metadata score (descending)
+            sorted_candidates = sorted(
+                [(id2, scores[id1][id2]) for id2 in self._films_ids if id2 != id1],
+                key=lambda x: x[1],
+                reverse=True
+            )
+
+            for id2, score in sorted_candidates:
+                if score >= 6:
+                    positives[id1].append(id2)
+                elif score < 6:
+                    negatives[id1].append(id2)
+
+            # cut lists max to 30 candidates to extract noise 
+            positives[id1] = positives[id1][:30]
+            negatives[id1] = negatives[id1][:30]
 
         return positives, negatives
 
