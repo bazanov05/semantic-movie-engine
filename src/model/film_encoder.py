@@ -30,6 +30,8 @@ class FilmEncoder(nn.Module):
         # add Layer for projection to get rid of general language meaning
         # and save only films' semantic meaning
         self._projection = nn.Linear(in_features=384, out_features=128)
+        self._dropout = nn.Dropout(p=0.25)  # kill 25% of 384 dim vector input
+        self.to(device=self._device)    # put whole model to GPU cause projection defaults to CPU
 
     def forward(self, embeddings: torch.Tensor) -> torch.Tensor:
         """
@@ -45,6 +47,7 @@ class FilmEncoder(nn.Module):
         Returns:
             L2-normalized 128-dim tensors of shape (batch_size, 128).
         """
+        embeddings = self._dropout(embeddings)
         embeddings = self._projection(embeddings)   # project vectors from 384 dim space to 128 one
         # normalize vectors so cosine similarity = dot product 
         return nn.functional.normalize(embeddings, p=2, dim=1)
@@ -90,7 +93,7 @@ class FilmEncoder(nn.Module):
         }, path)
 
     @classmethod
-    def load(cls, path: str) -> FilmEncoder:
+    def load(cls, path: str) -> "FilmEncoder":
         """
         Loads a FilmEncoder from a saved projection head checkpoint.
 
