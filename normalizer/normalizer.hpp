@@ -36,5 +36,5 @@ class TextNormalizer{
      * @param dirty_text The raw input string to clean.
      * @return A cleaned string containing only lowercase, non-stopword tokens separated by spaces.
      */
-    std::string clean(std::string& dirty_text) const;
+    std::string clean(const std::string& dirty_text) const;
 }; 

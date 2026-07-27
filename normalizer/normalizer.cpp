@@ -1,13 +1,19 @@
 #include "normalizer.hpp"
+#include <algorithm>
+#include <sstream>
+#include <cctype>
 
 
 TextNormalizer::TextNormalizer(const std::unordered_set<std::string>& stop_words): stop_words(stop_words){}
 
 
-std::string TextNormalizer::clean(std::string& dirty_text) const{
+std::string TextNormalizer::clean(const std::string& dirty_text) const{
+    // work on a local copy to prevent pybind11 buffer/encoding corruption
+    std::string text_copy = dirty_text;
+
     // remove all punctuation marks from dirty text
     // return an iterator to where the "deleted" elements start after rearranging
-    auto new_end = std::remove_if(dirty_text.begin(), dirty_text.end(), 
+    auto new_end = std::remove_if(text_copy.begin(), text_copy.end(), 
                     [](unsigned char ch) -> bool {
                         if(ch < 128){
                             return std::ispunct(ch) != 0;
@@ -17,10 +23,10 @@ std::string TextNormalizer::clean(std::string& dirty_text) const{
     );
 
     // delete punctuation marks based on iterator where they start 
-    dirty_text.erase(new_end, dirty_text.end());
+    text_copy.erase(new_end, text_copy.end());
 
     // create a stream from our dirty text to pull words from it based on the spaces 
-    std::stringstream stream(dirty_text);
+    std::stringstream stream(text_copy);
 
     std::string word;
     std::string clean_text = "";
