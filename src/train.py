@@ -16,7 +16,7 @@ from src.db import connection
 
 
 EPOCHS = 20
-MAX_PATIENCE_RATE = 4
+MAX_PATIENCE_RATE = 5
 
 
 def train():
@@ -74,6 +74,10 @@ def train():
         model.train()   # activate training mode to activate dropouts
 
         for anchors, positives, negatives in training_dataloader:
+            # skip loop if no positives and negatives were found for this anchor
+            if anchors.size(0) == 0:
+                continue
+
             # reset gradients before new batch
             optimizer.zero_grad()
 
@@ -103,6 +107,9 @@ def train():
 
         for anchors, positives, negatives in validation_dataloader:
             with torch.no_grad():
+                if anchors.size(0) == 0:
+                    continue
+
                 # move Tensors to GPU
                 anchors = anchors.to(model._device)
                 positives = positives.to(model._device)
