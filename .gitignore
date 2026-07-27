@@ -10,3 +10,4 @@ env/
 build 
 build/
 *.so
+*.pt
