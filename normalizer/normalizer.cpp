@@ -8,8 +8,11 @@ std::string TextNormalizer::clean(std::string& dirty_text) const{
     // remove all punctuation marks from dirty text
     // return an iterator to where the "deleted" elements start after rearranging
     auto new_end = std::remove_if(dirty_text.begin(), dirty_text.end(), 
-                    [](unsigned char ch) {
-                        return std::ispunct(ch);
+                    [](unsigned char ch) -> bool {
+                        if(ch < 128){
+                            return std::ispunct(ch) != 0;
+                        }
+                        return false;   // do not delete non-ASCII bytes
                     }
     );
 
@@ -25,8 +28,11 @@ std::string TextNormalizer::clean(std::string& dirty_text) const{
     while(stream >> word){
         // make every word consist of lower letters only 
         std::transform(word.begin(), word.end(), word.begin(), 
-                        [](char ch){
-                            return std::tolower(ch);
+                        [](unsigned char ch) -> unsigned char{
+                            if(ch < 128){
+                                return std::tolower(ch);
+                            }
+                            return ch;
                         }
         );
         // if this word is not a stop word - add it to clean text 
