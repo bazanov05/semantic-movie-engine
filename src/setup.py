@@ -11,6 +11,13 @@ PATH_TO_SQL_SCHEMA = "./src/db/schema.sql"
 
 
 def setup():
+    """
+    Initializes the database schema and loads cleaned dataset records.
+
+    Establishes a connection pool, processes raw CSV movie data through the 
+    cleaning pipeline, executes the SQL schema script to construct database 
+    tables, and performs bulk insertion of film records into PostgreSQL.
+    """
     connection.init_pool()
 
     # clean data in .csv file
